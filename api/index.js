@@ -9,61 +9,51 @@ module.exports = async (req, res) => {
     const configPath = path.join('/tmp', 'config.json');
     const zipPath = path.join('/tmp', 'xray.zip');
 
-    // 1. Subscription Logic (/sub)
+    // 1. Full Subscription Logic (/sub)
     if (req.url.endsWith('/sub')) {
+        // VLESS
         const vless = `vless://${uuid}@${host}:443?encryption=none&security=tls&type=ws&host=${host}&path=%2Fvless#Vercel_VLESS`;
+        
+        // VMess
         const vmessConfig = { 
             v: "2", ps: "Vercel_VMess", add: host, port: "443", id: uuid, 
             aid: "0", scy: "auto", net: "ws", type: "none", host: host, 
             path: "/vmess", tls: "tls", sni: host 
         };
         const vmess = `vmess://${Buffer.from(JSON.stringify(vmessConfig)).toString('base64')}`;
-        const subContent = Buffer.from(`${vless}\n${vmess}`).toString('base64');
+        
+        // Trojan
+        const trojan = `trojan://${uuid}@${host}:443?security=tls&type=ws&host=${host}&path=%2Ftrojan#Vercel_Trojan`;
+        
+        // Shadowsocks (SS) - Using AEAD-256-GCM (Password is UUID)
+        const ssInfo = Buffer.from(`aes-256-gcm:${uuid}`).toString('base64');
+        const ss = `ss://${ssInfo}@${host}:443?plugin=v2ray-plugin%3Bmode%3Dwebsocket%3Bpath%3D%2Fss%3Bhost%3D${host}%3Btls#Vercel_SS`;
+
+        // Combine all and encode to Base64
+        const subContent = Buffer.from(`${vless}\n${vmess}\n${trojan}\n${ss}`).toString('base64');
         
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         return res.status(200).send(subContent);
     }
 
-    // 2. Xray Binary Setup and Execution
+    // 2. Binary Execution Logic
     try {
         if (!fs.existsSync(xrayPath)) {
-            console.log("Downloading Xray binary...");
             const downloadUrl = "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip";
-            
-            // Download, Unzip, and Set Permissions
-            execSync(`curl -L -o ${zipPath} ${downloadUrl}`);
-            execSync(`unzip -o ${zipPath} -d /tmp`);
-            execSync(`chmod +x ${xrayPath}`);
-            console.log("Xray binary is ready.");
+            execSync(`curl -L -o ${zipPath} ${downloadUrl} && unzip -o ${zipPath} -d /tmp && chmod +x ${xrayPath}`);
         }
 
-        // Sync config.json from root to /tmp
         const localConfig = path.join(process.cwd(), 'config.json');
         if (fs.existsSync(localConfig)) {
             const configData = fs.readFileSync(localConfig, 'utf8');
             fs.writeFileSync(configPath, configData);
         }
 
-        // Run Xray process
-        const xray = spawn(xrayPath, ['-config', configPath]);
-
-        xray.stdout.on('data', (data) => console.log(`stdout: ${data}`));
-        xray.stderr.on('data', (data) => console.error(`stderr: ${data}`));
-
+        spawn(xrayPath, ['-config', configPath]);
     } catch (err) {
-        console.error("Execution Error:", err.message);
+        console.error("Error:", err.message);
     }
 
-    // 3. Response for Browser
     res.setHeader('Content-Type', 'text/html');
-    res.status(200).send(`
-        <html>
-            <head><title>Vercel Xray Node</title></head>
-            <body style="font-family:sans-serif; text-align:center; padding-top:50px;">
-                <h1 style="color:#0070f3;">Xray Node is Running</h1>
-                <p>Status: <span style="color:green;">Online</span></p>
-                <p>Subscription: <a href="/sub">/sub</a></p>
-            </body>
-        </html>
-    `);
+    res.status(200).send(`<h1>Xray Multi-Protocol Node</h1><p>Subscription: <a href="/sub">/sub</a></p>`);
 };
